@@ -11,7 +11,7 @@ import os
 LINE_WIDTH=6
 POINT_WIDTH=20
 
-def get_matching_pixels(img, threshold, invert, yellow):
+def get_matching_pixels(img, threshold, invert):
     pixels = np.asarray(img)
     threshold = np.array([threshold, threshold, threshold])
     if invert:
@@ -146,21 +146,39 @@ def get_ruler_line(ruler_pixels, ruler_line_height):
     cc = largest_connected_component(ruler_pixels, is_valid_cc)
     return cc
 
-def get_measurement_points(pixels, ruler_line):
+def get_points_between_lines(pixels, ruler_line):
     min_y = min([y[1] for y in ruler_line])
     max_y = max([y[1] for y in ruler_line])
     min_x = min([x[0] for x in ruler_line])
-    line_point = (min_x + 10, min_y)
+    line_point = (min_x + 20, min_y)
     for i in range (1, 100):
         x, y = line_point
         if pixels[y - i, x]:
-            return (line_point, (x, y-(i+(round((3/5)*i)))))
-    line_point = (min_x + 10, max_y)
+            return (line_point, (x, y - i))
+    line_point = (min_x + 20, max_y)
     for i in range (1, 100):
         x, y = line_point
         if pixels[y + i, x]:
-            return (line_point, (x, y+(i+(round((3/5)*i)))))
+            return (line_point, (x, y - i))
     return None
+
+def get_measurement_points(pixels, ruler_line):
+    p1, p2 = get_points_between_lines(pixels, ruler_line)
+    pixels_between = abs(p1[1] - p2[1])
+    min_line_height = round(pixels_between * (2/5))
+    max_line_height = round(pixels_between * (2/3))
+    if p1[1] > p2[1]:
+        x, y = p2
+        for i in range (min_line_height, max_line_height):
+            if not pixels[y - i, x]:
+                return (p1, (x, y - i))
+        return (p1, (x, y - max_line_height))
+    else:
+        x, y = p2
+        for i in range (min_line_height, max_line_height):
+            if not pixels[y + i, x]:
+                return (p1, (x, y + i))
+        return (p1, (x, y + max_line_height))   
 
 def get_px_per_in(measurement_points):
     pixels = abs(measurement_points[0][1] - measurement_points[1][1])
@@ -195,18 +213,17 @@ def process_image(filename, csv, args):
     threshold = 140 if not args.threshold else args.threshold
     ruler_threshold = 100 if not args.ruler_threshold else args.ruler_threshold
     invert = False if not args.invert else True
-    yellow = False if not args.yellow else True
     ruler_line_height = 100 if not args.ruler_line_height else args.ruler_line_height
     output_dir = args.output_directory
     print("Processing " + filename + ":")
     print("Loading image...")
     img = Image.open(args.directory + "/" + filename)
     print("Getting " + ("light" if invert else "dark") + " pixels...")
-    pixels = get_matching_pixels(img, threshold, invert, yellow)
+    pixels = get_matching_pixels(img, threshold, invert)
     print("Getting " + ("dark" if invert else "light") + " pixels...")
     inverse_pixels = np.invert(pixels.copy())
     print("Getting ruler line pixels...")
-    ruler_pixels = get_matching_pixels(img, ruler_threshold, False, False)
+    ruler_pixels = get_matching_pixels(img, ruler_threshold, False)
 
     if args.debug:
         im = img_frombytes(pixels)
@@ -248,9 +265,8 @@ if __name__== "__main__":
     parser.add_argument("-d", "--directory", type=str, required=True, help = "Folder in which the o-ring images are found")
     parser.add_argument("-o", "--output-directory", type=str, required=True, help = "Folder to put processed images and csv in")
     parser.add_argument("-i", "--invert", action='store_true', help = "Expect a ligher o-ring on a darker background")
-    parser.add_argument("-y", "--yellow", action='store_true', help = "Expect a yellow o-ring")
     parser.add_argument("-l", "--ruler-line-height", type=int, help = "Limit on the height of a ruler line")
-    parser.add_argument("-b", "--debug", type=int, help = "Outputs debugging images (dark, light, ruler) in rundir")
+    parser.add_argument("-b", "--debug", action='store_true', help = "Outputs debugging images (dark, light, ruler) in rundir")
     args = parser.parse_args()
     csv = [ "filename, outer_diameter_px, outer_diameter_in, inner_diameter_px, inner_diameter_in, px_per_in\n" ]
     for filename in os.listdir(args.directory):
