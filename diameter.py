@@ -11,30 +11,15 @@ import os
 LINE_WIDTH=6
 POINT_WIDTH=20
 
-def is_matching_pixel(rgb, threshold, invert, yellow):
-    r, g, b = rgb
+def get_matching_pixels(img, threshold, invert, yellow):
+    pixels = np.asarray(img)
+    threshold = np.array([threshold, threshold, threshold])
     if invert:
-        if yellow:
-            return b > threshold and g < 150 and r < 150
-        else:
-            return r > threshold and g > threshold and b > threshold
+        return np.all(threshold < pixels, axis=-1)
     else:
-        if yellow:
-            return b < threshold and g > 150 and r > 150
-        else:
-            return r < threshold and g < threshold and b < threshold
+        return np.all(threshold > pixels, axis=-1)
 
-def get_matching_pixels(img, pixels, threshold, invert, yellow):
-    matching_pixels = np.full((img.size[1], img.size[0]), False, dtype=bool)
-    for x in range(img.size[0]):
-        for y in range(img.size[1]):
-            if is_matching_pixel (pixels[x, y], threshold, invert, yellow):
-                matching_pixels[y, x] = True
-            else:
-                matching_pixels[y, x] = False
-    return matching_pixels
-
-def traverse_component(pixels, visited_set, coords, is_node):
+def traverse_component(pixels, visited_set, coords):
     component = set()
     to_visit = deque([coords])
     def visit ():
@@ -45,39 +30,35 @@ def traverse_component(pixels, visited_set, coords, is_node):
             return component
         x, y = to_visit.pop()
         visit ()
-        if not (x, y - 1) in visited_set and y - 1 > 0 and is_node(pixels, y - 1, x):
+        if not (x, y - 1) in visited_set and y - 1 > 0 and pixels[y - 1, x]:
             to_visit.append((x, y-1))
-        if not (x, y + 1) in visited_set and y + 1 < len(pixels) and is_node(pixels, y + 1, x):
+        if not (x, y + 1) in visited_set and y + 1 < len(pixels) and pixels[y + 1, x]:
             to_visit.append((x, y+1))
-        if not (x - 1, y) in visited_set and x - 1 > 0 and is_node(pixels, y, x - 1):
+        if not (x - 1, y) in visited_set and x - 1 > 0 and pixels[y, x - 1]:
             to_visit.append((x-1, y))
-        if not (x + 1, y) in visited_set and x + 1 < len(pixels[0]) and is_node(pixels, y, x + 1):
+        if not (x + 1, y) in visited_set and x + 1 < len(pixels[0]) and pixels[y, x + 1]:
             to_visit.append((x+1, y))
     return component
 
-def largest_connected_component(pixels, is_node, is_valid_cc):
+def largest_connected_component(pixels, is_valid_cc):
     visited_set = set()
     largest_cc = None
     for y in range(len(pixels)):
         for x in range(len(pixels[0])):
-            if is_node(pixels, y, x) and not (x, y) in visited_set:
-                component = traverse_component(pixels, visited_set, (x, y), is_node)
-                if is_valid_cc(component) and (largest_cc == None or len(component) > len(largest_cc)):
+            if pixels[y, x] and not (x, y) in visited_set:
+                component = traverse_component(pixels, visited_set, (x, y))
+                if (largest_cc == None or len(component) > len(largest_cc)) and is_valid_cc(component):
                     largest_cc = component
     return largest_cc
 
 def mask_o_ring(pixels):
     visited_set = set()
-    def is_node(pixels, y, x):
-        return pixels[y][x] 
-    largest_cc = largest_connected_component(pixels, is_node, lambda x: True)
+    largest_cc = largest_connected_component(pixels, lambda x: True)
     for y in range(len(pixels)):
         for x in range(len(pixels[0])):
             if not ((x, y) in largest_cc):
                 pixels[y, x] = False
-
     
-
 def get_outermost_pixels(pixels):
     max_y = [None] * len(pixels[0])
     max_x = [None] * len(pixels)
@@ -109,14 +90,12 @@ def get_outermost_pixels(pixels):
             outermost.add((x, y))
     return outermost
 
-def get_innermost_pixels(pixels):
+def get_innermost_pixels(inverse_pixels):
     visited_set = set()
-    def is_node(pixels, y, x):
-        return not pixels[y][x]
     def is_valid_cc(component):
         return not (0, 0) in component
-    largest_cc = largest_connected_component(pixels, is_node, is_valid_cc)
-    image_array = np.full((len(pixels), len(pixels[0])), False, dtype=bool)
+    largest_cc = largest_connected_component(inverse_pixels, is_valid_cc)
+    image_array = np.full((len(inverse_pixels), len(inverse_pixels[0])), False, dtype=bool)
     for x, y in largest_cc:
         image_array[y, x] = True
     innermost = get_outermost_pixels(image_array)
@@ -159,31 +138,27 @@ def set_color(array, x, y, r, g, b, w):
             array[y + j, x + i, 1] = g
             array[y + j, x + i, 2] = b
 
-def get_ruler_line(pixels, threshold, ruler_line_height):
-    def is_node(pixels, y, x):
-        return pixels[y][x][0] < threshold and pixels[y][x][1] < threshold and pixels[y][x][2] < threshold
+def get_ruler_line(ruler_pixels, ruler_line_height):
     def is_valid_cc(component):
         min_y = min([y[1] for y in component])
         max_y = max([y[1] for y in component])
         return max_y - min_y < ruler_line_height
-    cc = largest_connected_component(pixels, is_node, is_valid_cc)
+    cc = largest_connected_component(ruler_pixels, is_valid_cc)
     return cc
 
-def get_measurement_points(pixels, threshold, ruler_line):
-    def is_valid(y, x):
-        return pixels[y][x][0] < threshold and pixels[y][x][1] < threshold and pixels[y][x][2] < threshold
+def get_measurement_points(pixels, ruler_line):
     min_y = min([y[1] for y in ruler_line])
     max_y = max([y[1] for y in ruler_line])
     min_x = min([x[0] for x in ruler_line])
     line_point = (min_x + 10, min_y)
     for i in range (1, 100):
         x, y = line_point
-        if is_valid(y - i, x):
+        if pixels[y - i, x]:
             return (line_point, (x, y-(i+(round((3/5)*i)))))
     line_point = (min_x + 10, max_y)
     for i in range (1, 100):
         x, y = line_point
-        if is_valid(y + i, x):
+        if pixels[y + i, x]:
             return (line_point, (x, y+(i+(round((3/5)*i)))))
     return None
 
@@ -198,7 +173,6 @@ def ordered_measurement_points(points):
 
 def color_img(original_image, data, outermost, innermost, center_point, ruler_line, measurement_points):
     image_array = np.asarray(original_image)
-    size = data.shape[::-1]
     for (x, y) in outermost:
         set_color(image_array, x, y, 255, 0, 0, LINE_WIDTH)
     for (x, y) in innermost:
@@ -227,18 +201,25 @@ def process_image(filename, csv, args):
     print("Processing " + filename + ":")
     print("Loading image...")
     img = Image.open(args.directory + "/" + filename)
-    pixels = img.load()
     print("Getting " + ("light" if invert else "dark") + " pixels...")
-    pixels = get_matching_pixels(img, pixels, threshold, invert, yellow)
+    pixels = get_matching_pixels(img, threshold, invert, yellow)
+    print("Getting " + ("dark" if invert else "light") + " pixels...")
+    inverse_pixels = np.invert(pixels.copy())
+    print("Getting ruler line pixels...")
+    ruler_pixels = get_matching_pixels(img, ruler_threshold, False, False)
 
-    im = img_frombytes(pixels)
-    im.save("light.bmp")
+    if args.debug:
+        im = img_frombytes(pixels)
+        im.save("dark.bmp")
+        im = img_frombytes(inverse_pixels)
+        im.save("light.bmp")
+        im = img_frombytes(ruler_pixels)
+        im.save("ruler.bmp")
     
     print("Finding a line on the ruler...")
-    raw_image=np.asarray(img)
-    ruler_line = get_ruler_line(raw_image, ruler_threshold, ruler_line_height)
+    ruler_line = get_ruler_line(ruler_pixels, ruler_line_height)
     print("Getting px/in conversion...")
-    measurement_points = get_measurement_points(raw_image, ruler_threshold, ruler_line)
+    measurement_points = get_measurement_points(ruler_pixels, ruler_line)
     px_per_in = get_px_per_in(measurement_points)
     print("Px/in: " + str(px_per_in))
     print("Masking o-ring...")
@@ -246,7 +227,7 @@ def process_image(filename, csv, args):
     print("Finding outer edge of o-ring...")
     outermost=get_outermost_pixels(pixels)
     print("Finding inner edge of o-ring...")
-    innermost=get_innermost_pixels(pixels)
+    innermost=get_innermost_pixels(inverse_pixels)
     print("Getting outer diameter...")
     outermost_diameters=get_diameters(outermost)
     outer_diameter=get_average_diameter(outermost_diameters)
@@ -269,6 +250,7 @@ if __name__== "__main__":
     parser.add_argument("-i", "--invert", action='store_true', help = "Expect a ligher o-ring on a darker background")
     parser.add_argument("-y", "--yellow", action='store_true', help = "Expect a yellow o-ring")
     parser.add_argument("-l", "--ruler-line-height", type=int, help = "Limit on the height of a ruler line")
+    parser.add_argument("-b", "--debug", type=int, help = "Outputs debugging images (dark, light, ruler) in rundir")
     args = parser.parse_args()
     csv = [ "filename, outer_diameter_px, outer_diameter_in, inner_diameter_px, inner_diameter_in, px_per_in\n" ]
     for filename in os.listdir(args.directory):
