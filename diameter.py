@@ -166,7 +166,7 @@ def get_measurement_points(pixels, ruler_line):
     p1, p2 = get_points_between_lines(pixels, ruler_line)
     pixels_between = abs(p1[1] - p2[1])
     min_line_height = round(pixels_between * (2/5))
-    max_line_height = round(pixels_between * (2/3))
+    max_line_height = pixels_between
     if p1[1] > p2[1]:
         x, y = p2
         for i in range (min_line_height, max_line_height):
@@ -217,7 +217,7 @@ def process_image(filename, csv, args):
     output_dir = args.output_directory
     print("Processing " + filename + ":")
     print("Loading image...")
-    img = Image.open(args.directory + "/" + filename)
+    img = Image.open(os.path.join(args.directory, filename))
     print("Getting " + ("light" if invert else "dark") + " pixels...")
     pixels = get_matching_pixels(img, threshold, invert)
     print("Getting " + ("dark" if invert else "light") + " pixels...")
@@ -255,7 +255,7 @@ def process_image(filename, csv, args):
     center_point = get_center_point(outermost_diameters)
     print("Rendering witness image...")
     im = color_img(img, pixels, outermost, innermost, center_point, ruler_line, measurement_points)
-    im.save(output_dir + "/" + filename.rsplit('.', 1)[0] + "_processed" + ".bmp")
+    im.save(os.path.join(output_dir, filename.rsplit('.', 1)[0] + "_processed" + ".bmp"))
     csv.append(filename + "," + str(outer_diameter) + "," + str(outer_diameter / px_per_in) + "," + str(inner_diameter) + "," + str(inner_diameter / px_per_in) + "," + str(px_per_in) + "\n")
 
 if __name__== "__main__":
@@ -271,7 +271,7 @@ if __name__== "__main__":
     csv = [ "filename, outer_diameter_px, outer_diameter_in, inner_diameter_px, inner_diameter_in, px_per_in\n" ]
     for filename in os.listdir(args.directory):
         process_image(filename, csv, args)
-    f = open(args.output_directory + "/" + "measurements.csv", "w")
+    f = open(os.path.join(args.output_directory, "measurements.csv"), "w")
     f.writelines(csv)
     f.close()
     
