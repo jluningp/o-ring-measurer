@@ -1,5 +1,6 @@
 # O-Ring Measurement Script
 
+## Usage
 ```
 python3 diameter.py -h
 usage: diameter.py [-h] [-t THRESHOLD] [-r RULER_THRESHOLD] -d DIRECTORY -o OUTPUT_DIRECTORY [-i]
@@ -16,3 +17,9 @@ optional arguments:
                         Folder to put processed images and csv in
   -i, --invert          Expect a ligher o-ring on a darker background
 ```
+
+## Suggested Parameters
+
+1. Black o-rings: `python3 diameter.py -d inputs -o results`
+2. Yellow o-rings: `python3 diameter.py -d inputs -o results -y -l 75 -r 75`
+3. Clear o-rings: `python3 diameter.py -d inputs -o results -i`
