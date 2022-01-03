@@ -11,18 +11,24 @@ import os
 LINE_WIDTH=6
 POINT_WIDTH=20
 
-def is_matching_pixel(rgb, threshold, invert):
+def is_matching_pixel(rgb, threshold, invert, yellow):
     r, g, b = rgb
     if invert:
-        return r > threshold and g > threshold and b > threshold
+        if yellow:
+            return b > threshold and g < 150 and r < 150
+        else:
+            return r > threshold and g > threshold and b > threshold
     else:
-        return r < threshold and g < threshold and b < threshold
+        if yellow:
+            return b < threshold and g > 150 and r > 150
+        else:
+            return r < threshold and g < threshold and b < threshold
 
-def get_matching_pixels(img, pixels, threshold, invert):
+def get_matching_pixels(img, pixels, threshold, invert, yellow):
     matching_pixels = np.full((img.size[1], img.size[0]), False, dtype=bool)
     for x in range(img.size[0]):
         for y in range(img.size[1]):
-            if is_matching_pixel (pixels[x, y], threshold, invert):
+            if is_matching_pixel (pixels[x, y], threshold, invert, yellow):
                 matching_pixels[y, x] = True
             else:
                 matching_pixels[y, x] = False
@@ -153,13 +159,13 @@ def set_color(array, x, y, r, g, b, w):
             array[y + j, x + i, 1] = g
             array[y + j, x + i, 2] = b
 
-def get_ruler_line(pixels, threshold):
+def get_ruler_line(pixels, threshold, ruler_line_height):
     def is_node(pixels, y, x):
         return pixels[y][x][0] < threshold and pixels[y][x][1] < threshold and pixels[y][x][2] < threshold
     def is_valid_cc(component):
         min_y = min([y[1] for y in component])
         max_y = max([y[1] for y in component])
-        return max_y - min_y < 100
+        return max_y - min_y < ruler_line_height
     cc = largest_connected_component(pixels, is_node, is_valid_cc)
     return cc
 
@@ -173,12 +179,12 @@ def get_measurement_points(pixels, threshold, ruler_line):
     for i in range (1, 100):
         x, y = line_point
         if is_valid(y - i, x):
-            return (line_point, (x, y-(i+(round((2/3)*i)))))
+            return (line_point, (x, y-(i+(round((3/5)*i)))))
     line_point = (min_x + 10, max_y)
     for i in range (1, 100):
         x, y = line_point
         if is_valid(y + i, x):
-            return (line_point, (x, y+(i+(round((2/3)*i)))))
+            return (line_point, (x, y+(i+(round((3/5)*i)))))
     return None
 
 def get_px_per_in(measurement_points):
@@ -215,18 +221,24 @@ def process_image(filename, csv, args):
     threshold = 140 if not args.threshold else args.threshold
     ruler_threshold = 100 if not args.ruler_threshold else args.ruler_threshold
     invert = False if not args.invert else True
+    yellow = False if not args.yellow else True
+    ruler_line_height = 100 if not args.ruler_line_height else args.ruler_line_height
     output_dir = args.output_directory
     print("Processing " + filename + ":")
     print("Loading image...")
     img = Image.open(args.directory + "/" + filename)
     pixels = img.load()
     print("Getting " + ("light" if invert else "dark") + " pixels...")
-    pixels = get_matching_pixels(img, pixels, threshold, invert)  
+    pixels = get_matching_pixels(img, pixels, threshold, invert, yellow)
+
+    im = img_frombytes(pixels)
+    im.save("light.bmp")
+    
     print("Finding a line on the ruler...")
     raw_image=np.asarray(img)
-    ruler_line = get_ruler_line(raw_image, ruler_threshold)
+    ruler_line = get_ruler_line(raw_image, ruler_threshold, ruler_line_height)
     print("Getting px/in conversion...")
-    measurement_points = get_measurement_points(raw_image, threshold, ruler_line)
+    measurement_points = get_measurement_points(raw_image, ruler_threshold, ruler_line)
     px_per_in = get_px_per_in(measurement_points)
     print("Px/in: " + str(px_per_in))
     print("Masking o-ring...")
@@ -246,7 +258,7 @@ def process_image(filename, csv, args):
     print("Rendering witness image...")
     im = color_img(img, pixels, outermost, innermost, center_point, ruler_line, measurement_points)
     im.save(output_dir + "/" + filename.rsplit('.', 1)[0] + "_processed" + ".bmp")
-    csv.append(filename, str(outer_diameter) + "," + str(outer_diameter / px_per_in) + "," + str(inner_diameter) + "," + str(inner_diameter / px_per_in) + "," + str(px_per_in) + "\n")
+    csv.append(filename + "," + str(outer_diameter) + "," + str(outer_diameter / px_per_in) + "," + str(inner_diameter) + "," + str(inner_diameter / px_per_in) + "," + str(px_per_in) + "\n")
 
 if __name__== "__main__":
     parser = argparse.ArgumentParser()
@@ -255,6 +267,8 @@ if __name__== "__main__":
     parser.add_argument("-d", "--directory", type=str, required=True, help = "Folder in which the o-ring images are found")
     parser.add_argument("-o", "--output-directory", type=str, required=True, help = "Folder to put processed images and csv in")
     parser.add_argument("-i", "--invert", action='store_true', help = "Expect a ligher o-ring on a darker background")
+    parser.add_argument("-y", "--yellow", action='store_true', help = "Expect a yellow o-ring")
+    parser.add_argument("-l", "--ruler-line-height", type=int, help = "Limit on the height of a ruler line")
     args = parser.parse_args()
     csv = [ "filename, outer_diameter_px, outer_diameter_in, inner_diameter_px, inner_diameter_in, px_per_in\n" ]
     for filename in os.listdir(args.directory):
