@@ -101,6 +101,15 @@ def get_diameter_stats(diameters):
     min_ = diameters.min()
     return (average, std, max_, min_)
 
+def get_diameter_stats_in(diameters, px_per_in):
+    diameters = np.asarray([dist(x[0], x[1]) / px_per_in for x in diameters])
+    average = np.average(diameters)
+    std = np.std(diameters)
+    max_ = diameters.max()
+    min_ = diameters.min()
+    return (average, std, max_, min_)
+
+
 def get_center_point(diameters):
     centers=[]
     for pt1, pt2 in diameters:
@@ -109,6 +118,60 @@ def get_center_point(diameters):
         centers.append((half_x, half_y))
     average = [sum(x)/len(x) for x in zip(*centers)]
     return average
+
+def get_ruler_line(img, ruler_pixels, ruler_line_height):
+    def is_valid_cc(component):
+        component = np.transpose(component.nonzero())
+        min_y = min([y[0] for y in component])
+        max_y = max([y[0] for y in component])
+        return max_y - min_y < ruler_line_height
+    cc = largest_connected_component(ruler_pixels, is_valid_cc)
+    cc = np.transpose(cc.nonzero())
+    ruler_line = [ (x[1], x[0]) for x in cc]
+    return set(ruler_line)
+
+def get_points_between_lines(pixels, ruler_line):
+    min_y = min([y[1] for y in ruler_line])
+    max_y = max([y[1] for y in ruler_line])
+    min_x = min([x[0] for x in ruler_line])
+    line_point = (min_x + 20, min_y)
+    for i in range (1, 100):
+        x, y = line_point
+        if pixels[y - i, x]:
+            return (line_point, (x, y - i))
+    line_point = (min_x + 20, max_y)
+    for i in range (1, 100):
+        x, y = line_point
+        if pixels[y + i, x]:
+            return (line_point, (x, y - i))
+    return None
+
+def get_measurement_points(pixels, ruler_line):
+    p1, p2 = get_points_between_lines(pixels, ruler_line)
+    pixels_between = abs(p1[1] - p2[1])
+    min_line_height = round(pixels_between * (2/5))
+    max_line_height = pixels_between
+    if p1[1] > p2[1]:
+        x, y = p2
+        for i in range (min_line_height, max_line_height):
+            if not pixels[y - i, x]:
+                return (p1, (x, y - i))
+        return (p1, (x, y - max_line_height))
+    else:
+        x, y = p2
+        for i in range (min_line_height, max_line_height):
+            if not pixels[y + i, x]:
+                return (p1, (x, y + i))
+        return (p1, (x, y + max_line_height))   
+
+def get_px_per_in(measurement_points):
+    pixels = abs(measurement_points[0][1] - measurement_points[1][1])
+    return pixels * 64
+
+def ordered_measurement_points(points):
+    if points[0][1] <= points[1][1]:
+        return points
+    return (points[1], points[0])
 
 def set_color(array, x, y, r, g, b, w):
     half_w = w - round(w / 2)
@@ -119,12 +182,17 @@ def set_color(array, x, y, r, g, b, w):
             array[y + j, x + i, 1] = g
             array[y + j, x + i, 2] = b
 
-def color_img(original_image, data, outermost, innermost, center_point):
+def color_img(original_image, data, outermost, innermost, center_point, ruler_line, measurement_points):
     image_array = np.asarray(original_image)
     for (x, y) in outermost:
         set_color(image_array, x, y, 255, 0, 0, LINE_WIDTH)
     for (x, y) in innermost:
         set_color(image_array, x, y, 0, 255, 0, LINE_WIDTH)
+    for (x, y) in ruler_line:
+        set_color(image_array, x, y, 255, 0, 0, 1)
+    measure1, measure2 = ordered_measurement_points(measurement_points)
+    for i in range(measure2[1] - measure1[1]):
+        set_color(image_array, measure1[0], measure1[1] + i, 0, 255, 0, LINE_WIDTH)
     center_x, center_y = round(center_point[0]), round(center_point[1])
     set_color(image_array, center_x, center_y, 0, 0, 255, POINT_WIDTH)
     return Image.fromarray(image_array)
@@ -136,7 +204,9 @@ def img_frombytes(data):
 
 def process_image(filename, csv, args):
     threshold = 140 if not args.threshold else args.threshold
+    ruler_threshold = 100 if not args.ruler_threshold else args.ruler_threshold
     invert = False if not args.invert else True
+    ruler_line_height = 100 if not args.ruler_line_height else args.ruler_line_height
     output_dir = args.output_directory
     print("Processing " + filename + ":")
     print("Loading image...")
@@ -145,13 +215,21 @@ def process_image(filename, csv, args):
     pixels = get_matching_pixels(img, threshold, invert)
     print("Getting " + ("dark" if invert else "light") + " pixels...")
     inverse_pixels = np.invert(pixels.copy())
+    print("Getting ruler line pixels...")
+    ruler_pixels = get_matching_pixels(img, ruler_threshold, False)
 
     if args.debug:
         im = img_frombytes(pixels)
         im.save("dark.bmp")
         im = img_frombytes(inverse_pixels)
         im.save("light.bmp")
-    
+
+    print("Finding a line on the ruler...")
+    ruler_line = get_ruler_line(img, ruler_pixels, ruler_line_height)
+    print("Getting px/in conversion...")
+    measurement_points = get_measurement_points(ruler_pixels, ruler_line)
+    px_per_in = get_px_per_in(measurement_points)
+    print("Px/in: " + str(px_per_in))
     print("Masking o-ring...")
     pixels=mask_o_ring(pixels)
     print("Finding outer edge of o-ring...")
@@ -161,27 +239,31 @@ def process_image(filename, csv, args):
     print("Getting outer diameter...")
     outermost_diameters=get_diameters(outermost)
     outer_diameter_stats=get_diameter_stats(outermost_diameters)
+    outer_diameter_stats_in=get_diameter_stats_in(outermost_diameters, px_per_in)
     print("Getting inner diameter...")
     innermost_diameters=get_diameters(innermost)
     inner_diameter_stats=get_diameter_stats(innermost_diameters)
+    inner_diameter_stats_in=get_diameter_stats_in(innermost_diameters, px_per_in)
     print("Getting center point...")
     center_point = get_center_point(outermost_diameters)
     print("Rendering witness image...")
-    im = color_img(img, pixels, outermost, innermost, center_point)
+    im = color_img(img, pixels, outermost, innermost, center_point, ruler_line, measurement_points)
     im.save(os.path.join(output_dir, filename.rsplit('.', 1)[0] + "_processed" + ".bmp"))
-    row = [ filename ] + list(outer_diameter_stats) + list(inner_diameter_stats) + [ "\n" ]
+    row = [ filename ] + list(outer_diameter_stats) + list(outer_diameter_stats_in) + list(inner_diameter_stats) + list(inner_diameter_stats_in) + [ "\n" ]
     row = [ str(v) for v in row ]
     csv.append(",".join(row))
 
 if __name__== "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-t", "--threshold", type=int, help = "RGB threshold for o-ring color")
+    parser.add_argument("-r", "--ruler-threshold", type=int, help = "RGB threshold for rule color")
     parser.add_argument("-d", "--directory", type=str, required=True, help = "Folder in which the o-ring images are found")
     parser.add_argument("-o", "--output-directory", type=str, required=True, help = "Folder to put processed images and csv in")
     parser.add_argument("-i", "--invert", action='store_true', help = "Expect a ligher o-ring on a darker background")
+    parser.add_argument("-l", "--ruler-line-height", type=int, help = "Limit on the height of a ruler line")
     parser.add_argument("-b", "--debug", action='store_true', help = "Outputs debugging images (dark, light) in rundir")
     args = parser.parse_args()
-    csv = [ "filename, outer_diameter_avg, outer_diameter_std, outer_diameter_max, outer_diameter_min, inner_diameter_avg, inner_diameter_std, inner_diameter_max, inner_diameter_min\n" ]
+    csv = [ "filename, outer_diameter_px_avg, outer_diameter_px_std, outer_diameter_px_max, outer_diameter_px_min, outer_diameter_in_avg, outer_diameter_in_std, outer_diameter_in_max, outer_diameter_in_min, inner_diameter_px_avg, inner_diameter_px_std, inner_diameter_px_max, inner_diameter_px_min, inner_diameter_in_avg, inner_diameter_in_std, inner_diameter_in_max, inner_diameter_in_min\n" ]
     for filename in os.listdir(args.directory):
         process_image(filename, csv, args)
     f = open(os.path.join(args.output_directory, "measurements.csv"), "w")
