@@ -21,5 +21,4 @@ optional arguments:
 ## Suggested Parameters
 
 1. Black o-rings: `python3 diameter.py -d inputs -o results`
-2. Yellow o-rings: `python3 diameter.py -d inputs -o results -y -l 75 -r 75`
-3. Clear o-rings: `python3 diameter.py -d inputs -o results -i`
+2. Clear o-rings: `python3 diameter.py -d inputs -o results -i`
