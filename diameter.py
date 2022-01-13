@@ -178,9 +178,12 @@ def set_color(array, x, y, r, g, b, w):
     neg_half_w = half_w - w
     for i in range(neg_half_w, half_w):
         for j in range(neg_half_w, half_w):
-            array[y + j, x + i, 0] = r
-            array[y + j, x + i, 1] = g
-            array[y + j, x + i, 2] = b
+            try:
+                array[y + j, x + i, 0] = r
+                array[y + j, x + i, 1] = g
+                array[y + j, x + i, 2] = b
+            except:
+                pass
 
 def color_img(original_image, data, outermost, innermost, center_point, ruler_line, measurement_points):
     image_array = np.asarray(original_image)
