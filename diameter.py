@@ -14,7 +14,6 @@ POINT_WIDTH=20
 
 def get_matching_pixels(img, threshold, invert):
     pixels = np.asarray(img)
-    threshold = np.array([threshold, threshold, threshold])
     if invert:
         return np.all(threshold < pixels, axis=-1)
     else:
@@ -168,6 +167,23 @@ def get_px_per_in(measurement_points):
     pixels = abs(measurement_points[0][1] - measurement_points[1][1])
     return pixels * 64
 
+def get_tape_distance(red_pixels):
+ components, labeled_pixels = label_components(red_pixels)
+ one = np.nonzero(labeled_pixels == components[0][1])
+ two = np.nonzero(labeled_pixels == components[1][1])
+ min_y_one = np.min(one[0])
+ min_y_two = np.min(two[0])
+ max_y_one = np.max(one[0])
+ max_y_two = np.max(two[0])
+ upper = max(min_y_one, min_y_two)
+ lower = min(max_y_one, max_y_two)
+ dist = upper - lower
+ min_x_one = np.min(one[1])
+ max_x_one = np.max(one[1])
+ x_mid = round((min_x_one + max_x_one) / 2)
+ points = ((x_mid, lower), (x_mid, upper))
+ return (upper - lower, points)
+
 def ordered_measurement_points(points):
     if points[0][1] <= points[1][1]:
         return points
@@ -191,8 +207,9 @@ def color_img(original_image, data, outermost, innermost, center_point, ruler_li
         set_color(image_array, x, y, 255, 0, 0, LINE_WIDTH)
     for (x, y) in innermost:
         set_color(image_array, x, y, 0, 255, 0, LINE_WIDTH)
-    for (x, y) in ruler_line:
-        set_color(image_array, x, y, 255, 0, 0, 1)
+    if ruler_line:
+        for (x, y) in ruler_line:
+            set_color(image_array, x, y, 255, 0, 0, 1)
     measure1, measure2 = ordered_measurement_points(measurement_points)
     for i in range(measure2[1] - measure1[1]):
         set_color(image_array, measure1[0], measure1[1] + i, 0, 255, 0, LINE_WIDTH)
@@ -205,6 +222,7 @@ def img_frombytes(data):
     databytes = np.packbits(data, axis=1)
     return Image.frombytes(mode='1', size=size, data=databytes)
 
+
 def process_image(filename, csv, args):
     threshold = 140 if not args.threshold else args.threshold
     ruler_threshold = 100 if not args.ruler_threshold else args.ruler_threshold
@@ -215,23 +233,48 @@ def process_image(filename, csv, args):
     print("Loading image...")
     img = Image.open(os.path.join(args.directory, filename))
     print("Getting " + ("light" if invert else "dark") + " pixels...")
+    threshold = np.array([threshold, threshold, threshold])
     pixels = get_matching_pixels(img, threshold, invert)
     print("Getting " + ("dark" if invert else "light") + " pixels...")
     inverse_pixels = np.invert(pixels.copy())
-    print("Getting ruler line pixels...")
-    ruler_pixels = get_matching_pixels(img, ruler_threshold, False)
 
     if args.debug:
         im = img_frombytes(pixels)
         im.save("dark.bmp")
         im = img_frombytes(inverse_pixels)
         im.save("light.bmp")
+    
+    ruler_line = None
+    measurement_points = None
+    px_per_in = None
+    red_pixels = None
+    if args.marked_ruler:
+        print("Getting red pixels...")
+        # Gets pixels that have r > 150, g < 100, b < 100
+        red_threshold1 = np.array([150, 0, 0])
+        red_pixels1 = get_matching_pixels(img, red_threshold1, True)
+        red_threshold2 = np.array([300, 100, 100])
+        red_pixels2 = get_matching_pixels(img, red_threshold2, False)
+        red_pixels = np.logical_and(red_pixels1, red_pixels2)
 
-    print("Finding a line on the ruler...")
-    ruler_line = get_ruler_line(img, ruler_pixels, ruler_line_height)
-    print("Getting px/in conversion...")
-    measurement_points = get_measurement_points(ruler_pixels, ruler_line)
-    px_per_in = get_px_per_in(measurement_points)
+        print("Measuring distance between red tape...")
+        dist, tape_points = get_tape_distance(red_pixels)
+        measurement_points = tape_points
+        px_per_in = dist * 8
+
+        if args.debug:
+            im = img_frombytes(red_pixels)
+            im.save("red.bmp")
+    else:
+        print("Getting ruler line pixels...")
+        ruler_threshold = np.array([ruler_threshold, ruler_threshold, ruler_threshold])
+        ruler_pixels = get_matching_pixels(img, ruler_threshold, False)
+        print("Finding a line on the ruler...")
+        ruler_line = get_ruler_line(img, ruler_pixels, ruler_line_height)
+        print("Getting px/in conversion...")
+        measurement_points = get_measurement_points(ruler_pixels, ruler_line)
+        px_per_in = get_px_per_in(measurement_points)
+    
     print("Px/in: " + str(px_per_in))
     print("Masking o-ring...")
     pixels=mask_o_ring(pixels)
@@ -265,6 +308,7 @@ if __name__== "__main__":
     parser.add_argument("-i", "--invert", action='store_true', help = "Expect a ligher o-ring on a darker background")
     parser.add_argument("-l", "--ruler-line-height", type=int, help = "Limit on the height of a ruler line")
     parser.add_argument("-b", "--debug", action='store_true', help = "Outputs debugging images (dark, light) in rundir")
+    parser.add_argument("-m", "--marked-ruler", action='store_true', help = "Measures distance between two pieces of red tape on the ruler")
     args = parser.parse_args()
     csv = [ "filename, outer_diameter_px_avg, outer_diameter_px_std, outer_diameter_px_max, outer_diameter_px_min, outer_diameter_in_avg, outer_diameter_in_std, outer_diameter_in_max, outer_diameter_in_min, inner_diameter_px_avg, inner_diameter_px_std, inner_diameter_px_max, inner_diameter_px_min, inner_diameter_in_avg, inner_diameter_in_std, inner_diameter_in_max, inner_diameter_in_min\n" ]
     for filename in os.listdir(args.directory):
