@@ -202,7 +202,7 @@ def set_color(array, x, y, r, g, b, w):
                 pass
 
 def color_img(original_image, data, outermost, innermost, center_point, ruler_line, measurement_points):
-    image_array = np.asarray(original_image)
+    image_array = np.array(original_image)
     for (x, y) in outermost:
         set_color(image_array, x, y, 255, 0, 0, LINE_WIDTH)
     for (x, y) in innermost:
